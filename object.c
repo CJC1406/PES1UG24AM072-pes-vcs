@@ -49,10 +49,10 @@ int object_exists(const ObjectID *id) {
     return access(path, F_OK) == 0;
 }
 
-// ─── TODO: Implement these ──────────────────────────────────────────────────
+// ─── TODO IMPLEMENTATION ─────────────────────────────────────────────────────
 
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // Step 1: build header
+    // Step 1: header
     char header[64];
     const char *type_str;
 
@@ -61,24 +61,51 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     else if (type == OBJ_COMMIT) type_str = "commit";
     else return -1;
 
-    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1; // +1 for '\0'
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // Step 2: allocate full object buffer
+    // Step 2: full object buffer
     size_t total_size = header_len + len;
     char *full_obj = malloc(total_size);
     if (!full_obj) return -1;
 
-    // Step 3: copy header + data
     memcpy(full_obj, header, header_len);
     memcpy(full_obj + header_len, data, len);
 
-    // TEMP: will continue in next commit
+    // Step 3: hash
+    compute_hash(full_obj, total_size, id_out);
+
+    // Step 4: deduplication
+    if (object_exists(id_out)) {
+        free(full_obj);
+        return 0;
+    }
+
+    // Step 5: build path
+    char path[512];
+    object_path(id_out, path, sizeof(path));
+
+    // Step 6: extract directory
+    char dir[512];
+    strncpy(dir, path, sizeof(dir));
+    dir[sizeof(dir) - 1] = '\0';
+
+    char *last_slash = strrchr(dir, '/');
+    if (!last_slash) {
+        free(full_obj);
+        return -1;
+    }
+    *last_slash = '\0';
+
+    // Step 7: create shard directory
+    mkdir(dir, 0755);
+
+    // TEMP: next commit will write file
     free(full_obj);
-    return -1;
+    return 0;
 }
 
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
+    // TODO: Implement later
     (void)id; (void)type_out; (void)data_out; (void)len_out;
     return -1;
 }
