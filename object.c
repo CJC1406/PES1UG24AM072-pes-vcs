@@ -49,10 +49,9 @@ int object_exists(const ObjectID *id) {
     return access(path, F_OK) == 0;
 }
 
-// ─── TODO IMPLEMENTATION ─────────────────────────────────────────────────────
+// ─── IMPLEMENTATION ──────────────────────────────────────────────────────────
 
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // Step 1: header
     char header[64];
     const char *type_str;
 
@@ -63,7 +62,6 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // Step 2: full object buffer
     size_t total_size = header_len + len;
     char *full_obj = malloc(total_size);
     if (!full_obj) return -1;
@@ -71,20 +69,16 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(full_obj, header, header_len);
     memcpy(full_obj + header_len, data, len);
 
-    // Step 3: hash
     compute_hash(full_obj, total_size, id_out);
 
-    // Step 4: deduplication
     if (object_exists(id_out)) {
         free(full_obj);
         return 0;
     }
 
-    // Step 5: build path
     char path[512];
     object_path(id_out, path, sizeof(path));
 
-    // Step 6: extract directory
     char dir[512];
     strncpy(dir, path, sizeof(dir));
     dir[sizeof(dir) - 1] = '\0';
@@ -96,16 +90,98 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     }
     *last_slash = '\0';
 
-    // Step 7: create shard directory
     mkdir(dir, 0755);
 
-    // TEMP: next commit will write file
+    // temp file
+    char temp_path[512];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+
+    int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        free(full_obj);
+        return -1;
+    }
+
+    if (write(fd, full_obj, total_size) != (ssize_t)total_size) {
+        close(fd);
+        free(full_obj);
+        return -1;
+    }
+
+    fsync(fd);
+    close(fd);
+
+    if (rename(temp_path, path) != 0) {
+        free(full_obj);
+        return -1;
+    }
+
+    // fsync directory
+    int dir_fd = open(dir, O_RDONLY);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+
     free(full_obj);
     return 0;
 }
 
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement later
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
+
+    char *buffer = malloc(size);
+    if (!buffer) {
+        fclose(f);
+        return -1;
+    }
+
+    fread(buffer, 1, size, f);
+    fclose(f);
+
+    // verify hash
+    ObjectID computed;
+    compute_hash(buffer, size, &computed);
+
+    if (memcmp(&computed, id, sizeof(ObjectID)) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    // parse header
+    char *null_pos = memchr(buffer, '\0', size);
+    if (!null_pos) {
+        free(buffer);
+        return -1;
+    }
+
+    size_t header_len = null_pos - buffer + 1;
+
+    if (strncmp(buffer, "blob", 4) == 0) *type_out = OBJ_BLOB;
+    else if (strncmp(buffer, "tree", 4) == 0) *type_out = OBJ_TREE;
+    else if (strncmp(buffer, "commit", 6) == 0) *type_out = OBJ_COMMIT;
+    else {
+        free(buffer);
+        return -1;
+    }
+
+    *len_out = size - header_len;
+    *data_out = malloc(*len_out);
+    if (!*data_out) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(*data_out, buffer + header_len, *len_out);
+
+    free(buffer);
+    return 0;
 }
