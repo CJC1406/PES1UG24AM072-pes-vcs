@@ -1,6 +1,6 @@
 // ─── IMPLEMENTED ─────────────────────────────────────────────────────────────
 
-int commit_create(const char *message, ObjectID *commit_id_out) {
+int commit_create(const char *message, ObjectID *commit_id_out){
     Commit commit;
     memset(&commit, 0, sizeof(Commit));
 
