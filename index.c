@@ -98,7 +98,7 @@ int index_status(const Index *index) {
     return 0;
 }
 
-// ─── IMPLEMENTED ─────────────────────────────────────────────────────────────
+// ─── LOAD ────────────────────────────────────────────────────────────────────
 
 int index_load(Index *index) {
     index->count = 0;
@@ -110,7 +110,6 @@ int index_load(Index *index) {
         if (index->count >= MAX_INDEX_ENTRIES) break;
 
         IndexEntry *e = &index->entries[index->count];
-
         char hash_hex[HASH_HEX_SIZE + 1];
 
         int ret = fscanf(f, "%o %64s %ld %ld %255s\n",
@@ -134,14 +133,14 @@ int index_load(Index *index) {
     return 0;
 }
 
-// 🔥 SORT HELPER
+// ─── SAVE ────────────────────────────────────────────────────────────────────
+
 static int compare_index_entries(const void *a, const void *b) {
     return strcmp(((const IndexEntry *)a)->path,
                   ((const IndexEntry *)b)->path);
 }
 
 int index_save(const Index *index) {
-    // make sorted copy
     Index sorted = *index;
     qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_index_entries);
 
@@ -171,9 +170,52 @@ int index_save(const Index *index) {
     return 0;
 }
 
-// ─── TODO NEXT ───────────────────────────────────────────────────────────────
+// ─── ADD ─────────────────────────────────────────────────────────────────────
 
 int index_add(Index *index, const char *path) {
-    (void)index; (void)path;
-    return -1;
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        fprintf(stderr, "error: cannot access '%s'\n", path);
+        return -1;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    char *buffer = malloc(st.st_size);
+    if (!buffer) {
+        fclose(f);
+        return -1;
+    }
+
+    if (fread(buffer, 1, st.st_size, f) != (size_t)st.st_size) {
+        fclose(f);
+        free(buffer);
+        return -1;
+    }
+    fclose(f);
+
+    ObjectID id;
+    if (object_write(OBJ_BLOB, buffer, st.st_size, &id) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    free(buffer);
+
+    IndexEntry *e = index_find(index, path);
+    if (!e) {
+        if (index->count >= MAX_INDEX_ENTRIES) return -1;
+        e = &index->entries[index->count++];
+    }
+
+    strncpy(e->path, path, sizeof(e->path));
+    e->path[sizeof(e->path) - 1] = '\0';
+
+    e->mode = 0100644;
+    e->hash = id;
+    e->mtime_sec = st.st_mtime;
+    e->size = st.st_size;
+
+    return index_save(index);
 }
