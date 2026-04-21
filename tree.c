@@ -95,7 +95,6 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 }
 
 // ─── COMMIT #3 IMPLEMENTATION ───────────────────────────────────────────────
-
 int tree_from_index(ObjectID *id_out) {
     Index idx;
 
@@ -137,3 +136,4 @@ int tree_from_index(ObjectID *id_out) {
 
     return rc;
 }
+    
